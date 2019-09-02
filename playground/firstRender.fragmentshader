@@ -1,0 +1,96 @@
+#version 330 core
+
+//correspondence by name with what gets passed from vertex shader
+in vec3 fragCol;
+in vec3 worldCenterVertPos;
+
+in vec4 projCenterVertPos;
+in vec2 windowCenterVertPosXY;
+in vec4 projEdgePos;
+in vec2 windowEdgePosXY;
+
+layout(location = 0) out vec4 color;
+
+uniform mat4 MVP;
+uniform vec3 cameraPos;
+uniform mat4 invP;
+uniform mat4 MV;
+uniform mat4 invMVP;
+uniform vec3 viewLightPos;
+uniform float sphereRadius;
+uniform int nearFar; //0 means near rendering, 1 means far rendering
+uniform int imageSize;
+
+void main()
+{
+	float nearFarModifier = 0;
+	if (nearFar==0)
+		nearFarModifier = 1; //rendering near side
+	else
+		nearFarModifier = -1; //rendering far side
+
+	float xC = (gl_PointCoord.s - 0.5f)*2;
+	float yC = (gl_PointCoord.t - 0.5f)*2;
+
+	float distFromCenter = sqrt(xC*xC + yC*yC);
+	if (distFromCenter < 1.0f)
+	{
+		float distLeft = sqrt(1-distFromCenter*distFromCenter);
+
+		//Copied to vertex shader
+		vec3 vertCameraDir = normalize(cameraPos - worldCenterVertPos);
+		vec3 randomVector = vec3(0.0f,0.0f,1.0f); //I want a vector non-colinear with cameraDir
+		if (length(randomVector-vertCameraDir)<0.1f)
+			randomVector = vec3(0.0,1.0f,0.0f);
+		vec3 directionInPlanePerpToCameraDir = normalize(cross(vertCameraDir, randomVector));
+		//Copied to vertex shader
+
+		//symmetry works wonders since we're only interested in an accurate depth
+		vec3 fragPos = worldCenterVertPos + 
+					   directionInPlanePerpToCameraDir * distFromCenter * sphereRadius +
+					   vertCameraDir * distLeft * sphereRadius * nearFarModifier;
+
+		vec4 mvpFragPos = MVP * vec4(fragPos,1);
+		vec3 normFragPos = mvpFragPos.xyz / mvpFragPos.w;
+		
+		float n = gl_DepthRange.near;
+		float f = gl_DepthRange.far;
+
+		float depth = (normFragPos.z * (f-n) + (n+f))/2;
+		gl_FragDepth = depth;
+
+		vec4 viewport = vec4(0,0,imageSize,imageSize); //this needs to corresponds to WIDTH x HEIGHT
+		//Taken from https://www.khronos.org/opengl/wiki/Compute_eye_space_from_window_space
+		vec4 ndcPos;
+		ndcPos.xy = ((2.0 * gl_FragCoord.xy) - (2.0 * viewport.xy)) / (viewport.zw) - 1;
+		ndcPos.z = (2.0 * gl_FragCoord.z - gl_DepthRange.near - gl_DepthRange.far) /
+			(gl_DepthRange.far - gl_DepthRange.near);
+		ndcPos.w = 1.0;
+
+		vec4 clipPos = ndcPos / gl_FragCoord.w;
+		vec4 eyePos = invP * clipPos;
+		
+		vec3 eyePos3 = eyePos.xyz/eyePos.w;
+		
+		vec4 viewCenterVertPos4 = MV * vec4(worldCenterVertPos,1);
+		vec3 viewCenterVertPos = viewCenterVertPos4.xyz / viewCenterVertPos4.w;
+
+		vec3 viewFragPos = eyePos3;
+		vec3 viewVertCameraDir = normalize(vec3(0.0f,0.0f,0.0f) - viewCenterVertPos); //camera is at origin in view coordinates;
+		vec3 viewFragPosAdj = viewFragPos + viewVertCameraDir * distLeft * sphereRadius * nearFarModifier; //adjusting for depth
+
+		color.r = viewFragPosAdj.x;
+		color.g = viewFragPosAdj.y;
+		color.b = viewFragPosAdj.z;
+		color.a = length(viewFragPosAdj);
+	}
+	else
+	{
+		if (nearFar==0)
+			gl_FragDepth = 100000.0f; //should be higher than far clipping plane
+		else
+			gl_FragDepth = 0.0f; //should be lower than any possible depth value
+		color = vec4(0.0f,0.0f,0.0f,1.0f);
+	}
+
+}

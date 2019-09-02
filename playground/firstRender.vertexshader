@@ -1,0 +1,50 @@
+#version 330 core
+
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 vertCol;
+
+//correspondence by name with the geometry shader
+out vec3 fragCol;
+out vec3 worldCenterVertPos;
+
+out vec4 projCenterVertPos;
+out vec2 windowCenterVertPosXY;
+out vec4 projEdgePos;
+out vec2 windowEdgePosXY;
+
+uniform mat4 MVP;
+uniform vec3 cameraPos;
+uniform mat4 invP;
+uniform mat4 MV;
+uniform mat4 invMVP;
+uniform float sphereRadius;
+uniform int imageSize;
+
+void main()
+{
+	vec4 projCenterPos = MVP * vec4(pos,1);
+
+	//Copied from fragment shader
+	vec3 vertCameraDir = normalize(cameraPos - pos);
+	vec3 randomVector = vec3(0.0f,0.0f,1.0f); //I want a vector non-colinear with cameraDir
+	if (length(randomVector-vertCameraDir)<0.1f)
+		randomVector = vec3(0.0,1.0f,0.0f);
+	vec3 directionInPlanePerpToCameraDir = normalize(cross(vertCameraDir, randomVector));
+	//End of copy
+
+	vec4 projEdgePos = MVP * vec4(pos + directionInPlanePerpToCameraDir*sphereRadius,1);
+
+	float dist = length(cameraPos - pos);
+
+	gl_Position = projCenterPos;
+
+	fragCol = vertCol;
+	worldCenterVertPos = pos;
+	projCenterVertPos = projCenterPos;
+
+	float windowSize = imageSize; //from main program, same on x and y
+	windowCenterVertPosXY = (projCenterVertPos.xy / projCenterVertPos.w / 2 +vec2(0.5,0.5))* windowSize;
+	windowEdgePosXY = (projEdgePos.xy / projEdgePos.w / 2 + vec2(0.5,0.5)) * windowSize;
+
+	gl_PointSize = 2.0f * length(windowEdgePosXY - windowCenterVertPosXY);
+}

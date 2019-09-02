@@ -1,0 +1,90 @@
+#version 330 core
+
+in vec2 UV;
+
+out vec4 color;
+
+uniform sampler2D renderedTextureNear;
+uniform sampler2D renderedTextureFar;
+uniform sampler2D renderedTextureSky;
+uniform float time;
+uniform vec3 viewLightPos;
+
+void main(){
+
+	float neighbourDistance = 2.0f/1024.0f;
+	float REFRACTION_POWER = 0.01f;
+	vec3 fluidColor = vec3(0.0f,1.0f,1.0f);
+
+	vec3 pixelViewCoords = vec3(0,0,0);
+	pixelViewCoords = texture(renderedTextureNear, UV).rgb;
+	
+
+	if (length(pixelViewCoords)<0.1f)
+	{
+		vec3 pixelSkyboxColor = texture(renderedTextureSky, UV).rgb;
+		color = vec4(pixelSkyboxColor, 1.0f);
+	}
+	else
+	{
+		float possibleReversal = 1.0f;
+	
+		vec3 pixelViewCoordsUp = texture(renderedTextureNear, UV + neighbourDistance*vec2(0,1)).rgb;
+		if (length(pixelViewCoordsUp)<0.1f)
+		{
+			//They are actually pixelViewCoordsDown, but I need to keep the name for easier coding
+			pixelViewCoordsUp = texture(renderedTextureNear, UV + neighbourDistance*vec2(0,-1)).rgb;
+			possibleReversal = -possibleReversal;
+		}
+
+		vec3 pixelViewCoordsRight = texture(renderedTextureNear, UV + neighbourDistance*vec2(1,0)).rgb;
+		if (length(pixelViewCoordsRight)<0.1f)
+		{
+			//They are actually pixelViewCoordsLeft, but I need to keep the name for easier coding
+			pixelViewCoordsRight = texture(renderedTextureNear, UV + neighbourDistance*vec2(-1,0)).rgb;
+			possibleReversal = -possibleReversal;
+		}
+
+		//Lighting commences, everything in view coordinates
+		vec3 normalFrag = normalize(possibleReversal * cross(pixelViewCoordsRight-pixelViewCoords, pixelViewCoordsUp-pixelViewCoords));
+		vec3 fragLight = normalize(viewLightPos - pixelViewCoords);
+		vec3 fragEye = normalize(vec3(0,0,0) - pixelViewCoords);
+
+		vec3 reflectedRay = normalize(2 * dot(fragLight, normalFrag) * normalFrag - fragLight); //I think normalize may not be necessary, but it doesn't hurt anything, except some speed
+
+		float dotDiff = dot(fragLight, normalFrag); //Kind of obsolete
+		float dotSpec = dot(reflectedRay, fragEye);
+
+		
+		
+		//Instituting almost total reflection
+		bool seesLight = false;
+		if (dotDiff>0)
+		{
+			float dotSpecThreshold = 0.99f;
+			if (dotSpec>dotSpecThreshold)
+				seesLight = true;
+		}
+		
+		if (seesLight)
+		{
+			color = vec4(1.0f,1.0f,1.0f,1.0f);
+		}
+		else
+		{
+			vec3 pixelViewCoordsFar = texture(renderedTextureFar, UV).rgb;
+			float distNearFar = length(pixelViewCoords - pixelViewCoordsFar);
+
+			float thickness = distNearFar;
+
+			float expThickness = exp(-thickness);
+
+			vec3 refractedPixelSkyboxColor = texture(renderedTextureSky, UV + REFRACTION_POWER*thickness*normalFrag.xy).rgb;
+			vec3 finalColor = (fluidColor * (1-expThickness) + refractedPixelSkyboxColor * expThickness) * 1 + //refracted Fresnel part
+							  (                                0                                       ) * 0;  //reflected Fresnel part
+
+			color = vec4(finalColor, 1.0f);
+
+		}
+	}
+}
